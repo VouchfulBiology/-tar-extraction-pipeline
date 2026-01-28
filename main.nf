@@ -3,8 +3,8 @@
 nextflow.enable.dsl = 2
 
 /*
- * TAR Extraction Workflow
- * Extracts tar file from S3 using Fusion (no download needed!)
+ * TAR Extraction Workflow v2
+ * Uses direct S3 path with Fusion mounting (no channel.fromPath)
  */
 
 params.input_tar = "s3://default-compute-001-hn9mpq5gz/X401SC25112668-Z02-F001_V.tar.download/X401SC25112668-Z02-F001.tar"
@@ -15,38 +15,53 @@ process EXTRACT_TAR {
     memory '8 GB'
     cpus 4
     
-    input:
-    path tar_file
-    
     output:
-    path "extracted/*", type: 'dir', emit: files
+    path "extracted/**", type: 'dir', emit: files
     
     script:
     """
+    #!/bin/bash
     set -e
+    set -x  # Show commands being executed
     
-    echo "=== Starting tar extraction ==="
-    echo "Input file: ${tar_file}"
-    echo "File size: \$(ls -lh ${tar_file} | awk '{print \$5}')"
+    echo "=== Environment Check ==="
+    echo "Working directory: \$PWD"
+    echo "Input tar: ${params.input_tar}"
+    echo ""
     
-    # Create output directory
+    # Check if Fusion mounted the file
+    echo "Checking if file exists..."
+    if [ -f "${params.input_tar}" ]; then
+        echo "✓ File exists!"
+        ls -lh "${params.input_tar}"
+        echo "File size: \$(stat -c%s "${params.input_tar}") bytes"
+    else
+        echo "✗ ERROR: File not found: ${params.input_tar}"
+        echo "Listing parent directory:"
+        ls -la "\$(dirname "${params.input_tar}")" || echo "Parent dir not accessible"
+        exit 1
+    fi
+    
+    echo ""
+    echo "=== Starting Extraction ==="
     mkdir -p extracted
     
-    # Extract tar file (Fusion mounts S3 directly, no download needed!)
-    echo "Extracting tar file..."
-    tar -xzf ${tar_file} -C extracted/
+    # Extract tar file
+    echo "Running: tar -xzf ${params.input_tar} -C extracted/"
+    tar -xzf "${params.input_tar}" -C extracted/
     
-    echo "=== Extraction complete! ==="
-    echo "Files extracted:"
+    echo ""
+    echo "=== Extraction Complete! ==="
+    echo "Files extracted (first 20):"
     find extracted/ -type f | head -20
-    echo "..."
-    echo "Total files: \$(find extracted/ -type f | wc -l)"
+    if [ \$(find extracted/ -type f | wc -l) -gt 20 ]; then
+        echo "... (showing first 20 of \$(find extracted/ -type f | wc -l) total files)"
+    fi
+    echo ""
     echo "Total size: \$(du -sh extracted/ | cut -f1)"
     """
 }
 
 workflow {
-    // Fusion mounts S3 file directly - no download process needed!
-    tar_ch = channel.fromPath(params.input_tar)
-    EXTRACT_TAR(tar_ch)
+    EXTRACT_TAR()
 }
