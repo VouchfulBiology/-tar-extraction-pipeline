@@ -16,27 +16,26 @@ process EXTRACT_TAR {
     cpus 4
     
     input:
-    path tar_file
+    val tar_file_url
     
     output:
     path "extracted/**", type: 'dir', emit: files
     
     script:
     """
-    #!/bin/bash
     set -e
     set -x  # Show commands being executed
     
     echo "=== Starting Extraction ==="
     echo "Working directory: \$PWD"
-    echo "Input file: ${tar_file}"
+    echo "Input file URL: ${tar_file_url}"
     echo ""
     
     # Create output directory
     mkdir -p extracted
     
-    # Extract tar file (Fusion makes S3 files accessible directly)
-    tar -xzf "${tar_file}" -C extracted/
+    # Extract tar file directly from S3 via Fusion (no staging!)
+    tar -xzf "${tar_file_url}" -C extracted/
     
     echo ""
     echo "=== Extraction Complete! ==="
@@ -51,8 +50,8 @@ process EXTRACT_TAR {
 }
 
 workflow {
-    // Create channel with S3 file path
-    tar_ch = channel.fromPath(params.input_tar, checkIfExists: false)
+    // Pass S3 URL directly as value (no file staging - Fusion handles access)
+    tar_ch = channel.of(params.input_tar)
     
     // Run extraction
     EXTRACT_TAR(tar_ch)
