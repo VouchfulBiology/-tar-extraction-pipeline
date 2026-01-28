@@ -10,6 +10,38 @@ nextflow.enable.dsl = 2
 params.input_tar = "s3://default-compute-001-hn9mpq5gz/X401SC25112668-Z02-F001.tar"
 params.outdir = "s3://default-compute-001-hn9mpq5gz/extracted"
 
+process DOWNLOAD_TAR {
+    memory '4 GB'
+    cpus 2
+    
+    input:
+    val tar_path
+    
+    output:
+    path "downloaded.tar", emit: tar_file
+    
+    script:
+    """
+    set -e
+    
+    echo "=== Downloading tar file from S3 ==="
+    echo "Source: ${tar_path}"
+    
+    # Download using aws s3 cp with verification
+    aws s3 cp "${tar_path}" downloaded.tar
+    
+    echo "Download complete!"
+    echo "File size: \$(ls -lh downloaded.tar | awk '{print \$5}')"
+    
+    # Verify the tar file is valid
+    echo "Verifying tar file integrity..."
+    tar -tzf downloaded.tar > /dev/null && echo "✓ Tar file is valid" || {
+        echo "✗ ERROR: Tar file is corrupted!"
+        exit 1
+    }
+    """
+}
+
 process EXTRACT_TAR {
     publishDir params.outdir, mode: 'copy'
     memory '8 GB'
@@ -19,7 +51,7 @@ process EXTRACT_TAR {
     path tar_file
     
     output:
-    path "extracted/*", emit: files
+    path "extracted/**", emit: files
     
     script:
     """
@@ -29,30 +61,12 @@ process EXTRACT_TAR {
     echo "Input file: ${tar_file}"
     echo "File size: \$(du -h ${tar_file} | cut -f1)"
     
-    # Verify file exists and is readable
-    if [ ! -f "${tar_file}" ]; then
-        echo "ERROR: Tar file not found!"
-        exit 1
-    fi
-    
-    # Try to read first few bytes to verify file is accessible
-    echo "Verifying file integrity..."
-    head -c 1024 ${tar_file} > /dev/null || {
-        echo "ERROR: Cannot read tar file!"
-        exit 1
-    }
-    
     # Create output directory
     mkdir -p extracted
     
-    # Extract with verbose output and error handling
+    # Extract with progress
     echo "Extracting tar file..."
-    tar -xvf ${tar_file} -C extracted/ || {
-        echo "ERROR: Tar extraction failed!"
-        echo "Partial extraction may have occurred. Listing what was extracted:"
-        ls -lhR extracted/ || true
-        exit 1
-    }
+    tar -xvf ${tar_file} -C extracted/
     
     echo "=== Extraction complete! ==="
     echo "Files extracted:"
@@ -64,14 +78,16 @@ process EXTRACT_TAR {
 }
 
 workflow {
-    // Create channel from S3 tar file
-    tar_ch = channel.fromPath(params.input_tar)
+    // Step 1: Download tar file from S3 using AWS CLI
+    tar_path_ch = channel.of(params.input_tar)
+    DOWNLOAD_TAR(tar_path_ch)
     
-    // Extract the tar file
-    EXTRACT_TAR(tar_ch)
+    // Step 2: Extract the downloaded tar file
+    EXTRACT_TAR(DOWNLOAD_TAR.out.tar_file)
     
     // View the extracted files
     EXTRACT_TAR.out.files
         .flatten()
+        .take(10)
         .view { file -> "Extracted: ${file}" }
 }
