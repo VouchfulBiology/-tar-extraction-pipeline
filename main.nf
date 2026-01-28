@@ -12,6 +12,8 @@ params.outdir = "s3://default-compute-001-hn9mpq5gz/extracted"
 
 process EXTRACT_TAR {
     publishDir params.outdir, mode: 'copy'
+    memory '8 GB'
+    cpus 4
     
     input:
     path tar_file
@@ -21,12 +23,43 @@ process EXTRACT_TAR {
     
     script:
     """
-    mkdir -p extracted
-    tar -xvf ${tar_file} -C extracted/
+    set -e
     
-    echo "Extraction complete!"
+    echo "=== Starting tar extraction ==="
+    echo "Input file: ${tar_file}"
+    echo "File size: \$(du -h ${tar_file} | cut -f1)"
+    
+    # Verify file exists and is readable
+    if [ ! -f "${tar_file}" ]; then
+        echo "ERROR: Tar file not found!"
+        exit 1
+    fi
+    
+    # Try to read first few bytes to verify file is accessible
+    echo "Verifying file integrity..."
+    head -c 1024 ${tar_file} > /dev/null || {
+        echo "ERROR: Cannot read tar file!"
+        exit 1
+    }
+    
+    # Create output directory
+    mkdir -p extracted
+    
+    # Extract with verbose output and error handling
+    echo "Extracting tar file..."
+    tar -xvf ${tar_file} -C extracted/ || {
+        echo "ERROR: Tar extraction failed!"
+        echo "Partial extraction may have occurred. Listing what was extracted:"
+        ls -lhR extracted/ || true
+        exit 1
+    }
+    
+    echo "=== Extraction complete! ==="
     echo "Files extracted:"
-    ls -lh extracted/
+    find extracted/ -type f | head -20
+    echo "..."
+    echo "Total files: \$(find extracted/ -type f | wc -l)"
+    echo "Total size: \$(du -sh extracted/ | cut -f1)"
     """
 }
 
