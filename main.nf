@@ -15,6 +15,9 @@ process EXTRACT_TAR {
     memory '8 GB'
     cpus 4
     
+    input:
+    path tar_file
+    
     output:
     path "extracted/**", type: 'dir', emit: files
     
@@ -24,31 +27,16 @@ process EXTRACT_TAR {
     set -e
     set -x  # Show commands being executed
     
-    echo "=== Environment Check ==="
-    echo "Working directory: \$PWD"
-    echo "Input tar: ${params.input_tar}"
-    echo ""
-    
-    # Check if Fusion mounted the file
-    echo "Checking if file exists..."
-    if [ -f "${params.input_tar}" ]; then
-        echo "✓ File exists!"
-        ls -lh "${params.input_tar}"
-        echo "File size: \$(stat -c%s "${params.input_tar}") bytes"
-    else
-        echo "✗ ERROR: File not found: ${params.input_tar}"
-        echo "Listing parent directory:"
-        ls -la "\$(dirname "${params.input_tar}")" || echo "Parent dir not accessible"
-        exit 1
-    fi
-    
-    echo ""
     echo "=== Starting Extraction ==="
+    echo "Working directory: \$PWD"
+    echo "Input file: ${tar_file}"
+    echo ""
+    
+    # Create output directory
     mkdir -p extracted
     
-    # Extract tar file
-    echo "Running: tar -xzf ${params.input_tar} -C extracted/"
-    tar -xzf "${params.input_tar}" -C extracted/
+    # Extract tar file (Fusion makes S3 files accessible directly)
+    tar -xzf "${tar_file}" -C extracted/
     
     echo ""
     echo "=== Extraction Complete! ==="
@@ -63,5 +51,9 @@ process EXTRACT_TAR {
 }
 
 workflow {
-    EXTRACT_TAR()
+    // Create channel with S3 file path
+    tar_ch = channel.fromPath(params.input_tar, checkIfExists: false)
+    
+    // Run extraction
+    EXTRACT_TAR(tar_ch)
 }
